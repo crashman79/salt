@@ -1425,6 +1425,66 @@ def get_dvportgroups(parent_ref, portgroup_names=None, get_all_portgroups=False)
     return items
 
 
+def get_dvportgroup(service_instance, portgroup_name, dvs_switch=None, container_ref=None):
+    """
+    Return a distributed virtual portgroup object by name, optionally scoped to a DVS.
+
+    service_instance
+        The PyVmomi service instance
+
+    portgroup_name
+        The name of the distributed portgroup to find
+
+    dvs_switch
+        Optional DVS name or UUID to scope the search to a particular DVS
+
+    container_ref
+        Optional container reference to limit the search
+    """
+    # If a DVS is provided, try to find it by name or uuid and then search its portgroups
+    if dvs_switch:
+        # Retrieve all DVS objects under the container (if provided) or the whole inventory
+        try:
+            dvs_entries = get_mors_with_properties(
+                service_instance,
+                vim.DistributedVirtualSwitch,
+                property_list=["name", "uuid"],
+                container_ref=container_ref,
+            )
+        except Exception:
+            dvs_entries = []
+
+        matched_dvs = []
+        for entry in dvs_entries:
+            name = entry.get("name")
+            # Some pyVmomi versions expose uuid under different attrs; try both
+            uuid = getattr(entry.get("object"), "uuid", None) or entry.get("uuid")
+            if name == dvs_switch or str(uuid) == str(dvs_switch):
+                matched_dvs.append(entry["object"])
+
+        if matched_dvs:
+            # Prefer exact match by uuid if multiple; otherwise first match
+            dvs_ref = matched_dvs[0]
+            # Use existing helper to list portgroups on the DVS
+            try:
+                pg_list = get_dvportgroups(dvs_ref, portgroup_names=[portgroup_name])
+            except Exception:
+                pg_list = []
+            if pg_list:
+                return pg_list[0]
+
+    # Fallback: try global lookup by portgroup name (existing behavior)
+    try:
+        return get_mor_by_property(
+            service_instance,
+            vim.dvs.DistributedVirtualPortgroup,
+            portgroup_name,
+            container_ref=container_ref,
+        )
+    except Exception:
+        return None
+
+
 def get_uplink_dvportgroup(dvs_ref):
     """
     Returns the uplink distributed virtual portgroup of a distributed virtual
